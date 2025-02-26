@@ -1,0 +1,98 @@
+class SimpleWordCloud:
+    def __init__(self, text, max_attempts=50):
+        self.text = text
+        self.max_attempts = max_attempts  # Maximum retries to place a word
+        self.word_freq = self._calculate_word_frequencies()
+        self.placed_words = []  # Stores positions of placed words
+    
+    def _calculate_word_frequencies(self):
+        words = ''.join([c if c.isalnum() else ' ' for c in self.text.lower()]).split()
+        word_count = {}
+        for word in words:
+            word_count[word] = word_count.get(word, 0) + 1
+        return word_count
+    
+    def generate_cloud(self, max_words):
+        word_list = sorted(self.word_freq.items(), key=lambda x: -x[1])[:max_words]
+
+        min_size = 10  # Ensure smallest words are still visible
+        max_size = 100  # Cap the largest word size
+
+        max_freq = max(self.word_freq.values(), default=1)
+        scale_factor = (max_size - min_size) / max_freq  # Adjust scaling
+
+        return [(word, min_size + freq * scale_factor) for word, freq in word_list]
+
+
+    @staticmethod
+    def random_color():
+        """Generates high-contrast, readable colors."""
+        hue = random.uniform(0, 360)  # Choose a random hue (color wheel)
+        saturation = random.uniform(0.5, 1.0)  # Ensure strong saturation (avoid grays)
+        brightness = random.uniform(0.4, 0.8)  # Avoid too dark or too light colors
+        return SimpleWordCloud.hsv_to_rgb(hue, saturation, brightness)
+
+    @staticmethod
+    def hsv_to_rgb(h, s, v):
+        """Converts HSV to RGB."""
+        c = v * s
+        x = c * (1 - abs((h / 60) % 2 - 1))
+        m = v - c
+
+        if 0 <= h < 60:
+            r, g, b = c, x, 0
+        elif 60 <= h < 120:
+            r, g, b = x, c, 0
+        elif 120 <= h < 180:
+            r, g, b = 0, c, x
+        elif 180 <= h < 240:
+            r, g, b = 0, x, c
+        elif 240 <= h < 300:
+            r, g, b = x, 0, c
+        else:
+            r, g, b = c, 0, x
+
+        return (r + m, g + m, b + m)  # Normalize to RGB 0-1 range
+
+    def _find_non_overlapping_position(self, word, size):
+        for _ in range(self.max_attempts):
+            x, y = random.uniform(0.05, 0.95), random.uniform(0.05, 0.95)  # Increase placement range
+            width, height = len(word) * 0.015, size * 0.015  # Reduce estimated word size
+
+            overlap = any(x < px + pw and x + width > px and y < py + ph and y + height > py
+                          for px, py, pw, ph in self.placed_words)
+
+            if not overlap:
+                self.placed_words.append((x, y, width, height))
+                return x, y
+    
+        return None, None
+
+
+    def display(self, max_words=100, save_path=None):
+        self.placed_words = []  # Reset word placements
+        word_data = self.generate_cloud(max_words)
+
+        plt.figure(figsize=(10, 6))
+        plt.axis('off')
+
+        for word, size in word_data:
+            x, y = self._find_non_overlapping_position(word, size)
+            if x is not None and y is not None:
+                plt.text(x, y, word, fontsize=int(size), ha='center', va='center', 
+                         alpha=0.7, color=self.random_color())
+
+        # **Save to File if Path is Provided**
+        if save_path:
+            plt.savefig(save_path, bbox_inches='tight', dpi=300)
+            print(f"Word cloud saved to {save_path}")
+
+        plt.show()
+
+# Convert the DataFrame column to a single string
+text_data = " ".join(posts_df['Words'].dropna().astype(str))  # Remove NaN and ensure string type
+
+# Create and display the word cloud
+cloud = SimpleWordCloud(text_data)
+
+cloud.display(50, "WordCloud_Posts.png")
