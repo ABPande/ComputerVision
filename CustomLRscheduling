@@ -3,6 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+from tensorflow.keras.optimizers import Adam, SGD, RMSprop
+from tensorflow.keras.callbacks import LearningRateScheduler
+from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
+from sklearn.model_selection import RandomizedSearchCV
 
 # Step Decay Learning Rate Scheduler
 def step_decay(epoch, initial_lr=0.01, drop=0.5, epochs_drop=10):
@@ -28,6 +32,50 @@ class CyclicalLearningRate(tf.keras.callbacks.Callback):
 def polynomial_decay(epoch, initial_lr=0.01, power=1.0, total_epochs=50):
     return initial_lr * (1 - (epoch / total_epochs)) ** power
 
+# Compile Model with Optimizer and Scheduler
+def compile_model(model, optimizer='adam', learning_rate=0.001):
+    if optimizer == 'adam':
+        opt = Adam(learning_rate=learning_rate)
+    elif optimizer == 'sgd':
+        opt = SGD(learning_rate=learning_rate)
+    elif optimizer == 'rmsprop':
+        opt = RMSprop(learning_rate=learning_rate)
+    else:
+        raise ValueError("Unsupported optimizer. Choose from: 'adam', 'sgd', 'rmsprop'")
+
+    model.compile(optimizer=opt, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+# Hyperparameter Tuning with Optimizers & Learning Rate Schedulers
+def optimizer_scheduler_tuning(model_fn, train_images, train_labels, param_grid=None, n_iter=10):
+    """
+    Tunes optimizers and learning rate schedules for a given model.
+
+    Parameters:
+    - model_fn: Function returning a compiled Keras model.
+    - train_images: NumPy array of training images.
+    - train_labels: NumPy array of training labels.
+    - param_grid: Dictionary of hyperparameters to tune.
+    - n_iter: Number of iterations for RandomizedSearchCV.
+
+    Returns:
+    - Best model found.
+    - Best hyperparameters.
+    """
+    if param_grid is None:
+        param_grid = {
+            'optimizer': ['adam', 'sgd', 'rmsprop'],
+            'learning_rate': [0.001, 0.0001, 0.01],
+            'scheduler': ['step_decay', 'cyclical', 'polynomial']
+        }
+
+    model = KerasClassifier(build_fn=model_fn, verbose=0)
+
+    random_search = RandomizedSearchCV(estimator=model, param_distributions=param_grid, n_iter=n_iter, cv=3, verbose=1, n_jobs=-1)
+    random_search.fit(train_images, train_labels)
+
+    return random_search.best_estimator_, random_search.best_params_
+
 # Example Model Definition
 def build_model():
     model = Sequential([
@@ -39,26 +87,34 @@ def build_model():
     ])
     return model
 
-# Load CIFAR-10 dataset
-(train_images, train_labels), (_, _) = tf.keras.datasets.cifar10.load_data()
-train_images = train_images / 255.0  # Normalize images
+# Example Usage
+if __name__ == "__main__":
+    from tensorflow.keras.datasets import cifar10
 
-# Compile model with Step Decay scheduler
-model = build_model()
-initial_lr = 0.01
-lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lambda epoch: step_decay(epoch, initial_lr))
+    (train_images, train_labels), (_, _) = cifar10.load_data()
+    train_images = train_images / 255.0  # Normalize images
 
-model.compile(optimizer=tf.keras.optimizers.Adam(), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    # Define Model with Learning Rate Scheduler
+    def model_fn():
+        model = build_model()
+        compiled_model = compile_model(model)
+        return compiled_model
 
-# Train model with LR scheduler
-history = model.fit(train_images, train_labels, epochs=20, batch_size=64, callbacks=[lr_scheduler])
+    best_model, best_params = optimizer_scheduler_tuning(model_fn, train_images, train_labels)
+    print("Best Hyperparameters:", best_params)
 
-# Plot Learning Rate Schedule
-epochs = range(20)
-lr_values = [step_decay(epoch, initial_lr) for epoch in epochs]
+    # Training Best Model with Selected Scheduler
+    selected_scheduler = best_params['scheduler']
+    if selected_scheduler == 'step_decay':
+        scheduler_callback = LearningRateScheduler(lambda epoch: step_decay(epoch, initial_lr=best_params['learning_rate']))
+    elif selected_scheduler == 'cyclical':
+        scheduler_callback = CyclicalLearningRate(base_lr=0.0001, max_lr=0.01, step_size=2000)
+    elif selected_scheduler == 'polynomial':
+        scheduler_callback = LearningRateScheduler(lambda epoch: polynomial_decay(epoch, initial_lr=best_params['learning_rate'], total_epochs=50))
+    else:
+        scheduler_callback = None
 
-plt.plot(epochs, lr_values, label="Step Decay Schedule")
-plt.xlabel("Epochs")
-plt.ylabel("Learning Rate")
-plt.legend()
-plt.show()
+    if scheduler_callback:
+        best_model.model.fit(train_images, train_labels, epochs=20, batch_size=64, callbacks=[scheduler_callback])
+
+    best_model.model.summary()
