@@ -1,0 +1,52 @@
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+def create_batch_loaders(train_images, train_labels, test_images, test_labels, batch_size=32, shuffle=True, augment=False):
+    """
+    Creates TensorFlow data batch loaders for training and testing images.
+    
+    Parameters:
+    - train_images: NumPy array of training images
+    - train_labels: NumPy array of training labels
+    - test_images: NumPy array of testing images
+    - test_labels: NumPy array of testing labels
+    - batch_size: Number of samples per batch (default: 32)
+    - shuffle: Whether to shuffle the dataset (default: True)
+    - augment: Whether to apply data augmentation (default: False)
+    
+    Returns:
+    - train_loader: TensorFlow dataset object for training
+    - test_loader: TensorFlow dataset object for testing
+    """
+    if augment:
+        train_datagen = ImageDataGenerator(
+            rotation_range=20,
+            width_shift_range=0.2,
+            height_shift_range=0.2,
+            horizontal_flip=True,
+            rescale=1.0/255.0
+        )
+    else:
+        train_datagen = ImageDataGenerator(rescale=1.0/255.0)
+    
+    test_datagen = ImageDataGenerator(rescale=1.0/255.0)
+    
+    train_loader = train_datagen.flow(train_images, train_labels, batch_size=batch_size, shuffle=shuffle)
+    test_loader = test_datagen.flow(test_images, test_labels, batch_size=batch_size, shuffle=False)
+    
+    return train_loader, test_loader
+
+# Example usage
+if __name__ == "__main__":
+    from tensorflow.keras.datasets import cifar10
+    
+    (train_images, train_labels), (test_images, test_labels) = cifar10.load_data()
+    
+    train_loader, test_loader = create_batch_loaders(
+        train_images, train_labels, test_images, test_labels, batch_size=64, augment=True
+    )
+    
+    for batch in train_loader:
+        images, labels = batch
+        print(f"Batch shape: {images.shape}, Labels shape: {labels.shape}")
+        break
