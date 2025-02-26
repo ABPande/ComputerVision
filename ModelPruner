@@ -1,0 +1,60 @@
+import tensorflow as tf
+import tensorflow_model_optimization as tfmot
+
+def prune_model(model, train_data, test_data, pruning_factor=0.5, epochs=5, batch_size=32):
+    """
+    Prunes a given computer vision model to reduce size while retaining accuracy.
+    
+    Parameters:
+    - model: The Keras model to be pruned
+    - train_data: Training dataset (TensorFlow dataset or NumPy array)
+    - test_data: Testing dataset (TensorFlow dataset or NumPy array)
+    - pruning_factor: The sparsity factor for pruning (default: 0.5, range: 0-1)
+    - epochs: Number of epochs for fine-tuning after pruning (default: 5)
+    - batch_size: Batch size for training (default: 32)
+    
+    Returns:
+    - Pruned and fine-tuned model
+    """
+    prune_low_magnitude = tfmot.sparsity.keras.prune_low_magnitude
+    
+    pruning_params = {
+        "pruning_schedule": tfmot.sparsity.keras.PolynomialDecay(
+            initial_sparsity=0.0, final_sparsity=pruning_factor, begin_step=0, end_step=epochs * len(train_data)
+        )
+    }
+    
+    pruned_model = prune_low_magnitude(model, **pruning_params)
+    
+    # Compile the pruned model
+    pruned_model.compile(
+        optimizer=model.optimizer,
+        loss=model.loss,
+        metrics=model.metrics
+    )
+    
+    # Train the pruned model to recover accuracy
+    pruned_model.fit(train_data, epochs=epochs, batch_size=batch_size, validation_data=test_data)
+    
+    # Strip pruning wrappers for inference
+    final_model = tfmot.sparsity.keras.strip_pruning(pruned_model)
+    
+    return final_model
+
+# Example usage
+if __name__ == "__main__":
+    from tensorflow.keras.applications import MobileNetV2
+    from tensorflow.keras.datasets import cifar10
+    
+    # Load a sample model
+    model = MobileNetV2(weights=None, input_shape=(32, 32, 3), classes=10)
+    
+    # Load CIFAR-10 dataset
+    (train_images, train_labels), (test_images, test_labels) = cifar10.load_data()
+    train_images, test_images = train_images / 255.0, test_images / 255.0
+    
+    # Perform pruning
+    pruned_model = prune_model(model, (train_images, train_labels), (test_images, test_labels), pruning_factor=0.5, epochs=5)
+    
+    # Display model summary
+    pruned_model.summary()
