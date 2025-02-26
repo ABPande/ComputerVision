@@ -1,0 +1,64 @@
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+
+# Step Decay Learning Rate Scheduler
+def step_decay(epoch, initial_lr=0.01, drop=0.5, epochs_drop=10):
+    return initial_lr * (drop ** (epoch // epochs_drop))
+
+# Cyclical Learning Rate (CLR)
+class CyclicalLearningRate(tf.keras.callbacks.Callback):
+    def __init__(self, base_lr=0.001, max_lr=0.006, step_size=2000.):
+        super(CyclicalLearningRate, self).__init__()
+        self.base_lr = base_lr
+        self.max_lr = max_lr
+        self.step_size = step_size
+        self.lr_values = []
+
+    def on_train_batch_begin(self, batch, logs=None):
+        cycle = np.floor(1 + batch / (2 * self.step_size))
+        x = np.abs(batch / self.step_size - 2 * cycle + 1)
+        lr = self.base_lr + (self.max_lr - self.base_lr) * np.maximum(0, (1 - x))
+        self.model.optimizer.lr.assign(lr)
+        self.lr_values.append(lr)
+
+# Polynomial Decay Learning Rate
+def polynomial_decay(epoch, initial_lr=0.01, power=1.0, total_epochs=50):
+    return initial_lr * (1 - (epoch / total_epochs)) ** power
+
+# Example Model Definition
+def build_model():
+    model = Sequential([
+        Conv2D(32, (3, 3), activation='relu', input_shape=(32, 32, 3)),
+        MaxPooling2D(pool_size=(2, 2)),
+        Flatten(),
+        Dense(128, activation='relu'),
+        Dense(10, activation='softmax')
+    ])
+    return model
+
+# Load CIFAR-10 dataset
+(train_images, train_labels), (_, _) = tf.keras.datasets.cifar10.load_data()
+train_images = train_images / 255.0  # Normalize images
+
+# Compile model with Step Decay scheduler
+model = build_model()
+initial_lr = 0.01
+lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lambda epoch: step_decay(epoch, initial_lr))
+
+model.compile(optimizer=tf.keras.optimizers.Adam(), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
+# Train model with LR scheduler
+history = model.fit(train_images, train_labels, epochs=20, batch_size=64, callbacks=[lr_scheduler])
+
+# Plot Learning Rate Schedule
+epochs = range(20)
+lr_values = [step_decay(epoch, initial_lr) for epoch in epochs]
+
+plt.plot(epochs, lr_values, label="Step Decay Schedule")
+plt.xlabel("Epochs")
+plt.ylabel("Learning Rate")
+plt.legend()
+plt.show()
