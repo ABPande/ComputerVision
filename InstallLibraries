@@ -1,0 +1,53 @@
+import subprocess
+import sys
+
+def install_or_upgrade(package):
+    """
+    Installs or upgrades a given package to ensure compatibility.
+    """
+    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", package], check=True)
+
+def install_computer_vision_packages():
+    """
+    Installs or upgrades essential computer vision libraries.
+    """
+    packages = [
+        "tensorflow",  # Deep learning framework
+        "torch",  # PyTorch for deep learning
+        "torchvision",  # Image transformations for PyTorch
+        "opencv-python",  # Computer vision library
+        "opencv-python-headless",  # Headless version for servers
+        "matplotlib",  # Visualization library
+        "numpy",  # Numerical computing
+        "scipy",  # Scientific computing
+        "pillow",  # Image processing
+        "scikit-image",  # Advanced image processing
+        "scikit-learn",  # Machine learning utilities
+        "albumentations",  # Data augmentation
+        "imgaug",  # Image augmentation
+        "tqdm",  # Progress bars
+        "onnx",  # Open Neural Network Exchange format
+        "onnxruntime",  # ONNX runtime for model inference
+        "mediapipe",  # Google’s computer vision framework
+        "tflite-runtime",  # TensorFlow Lite for edge AI
+        "tensorflow-addons",  # Additional TensorFlow utilities
+        "tensorflow-datasets",  # Pre-built datasets for TensorFlow
+        "torchsummary",  # Model summary for PyTorch
+        "keras",  # High-level deep learning API
+        "pycocotools",  # COCO dataset utilities
+        "imageio",  # Image I/O
+        "seaborn",  # Advanced visualization
+        "pyyaml",  # Configuration files
+        "h5py",  # HDF5 format support
+        "pyzbar",  # Barcode & QR code detection
+        "lap",  # Linear Assignment Problem solver (used in tracking)
+    ]
+    
+    for package in packages:
+        print(f"Installing or upgrading {package}...")
+        install_or_upgrade(package)
+    
+    print("All necessary computer vision packages are installed and up to date.")
+
+if __name__ == "__main__":
+    install_computer_vision_packages()
