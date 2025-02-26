@@ -4,7 +4,7 @@ import numpy as np
 
 def multi_teacher_distillation(teacher_models, student_model, train_data, test_data, temperature=5.0, alpha=0.5, epochs=10, batch_size=32):
     """
-    Performs multi-teacher knowledge distillation on a given student model.
+    Performs multi-teacher knowledge distillation on a given student model with adaptive teacher weighting.
     
     Parameters:
     - teacher_models: List of pre-trained Keras teacher models
@@ -22,9 +22,16 @@ def multi_teacher_distillation(teacher_models, student_model, train_data, test_d
     train_images, train_labels = train_data
     test_images, test_labels = test_data
     
+    def get_teacher_weights(images):
+        """Assigns weights to teachers based on their accuracy on the dataset."""
+        accuracies = [np.mean(np.argmax(teacher.predict(images), axis=1) == train_labels.flatten()) for teacher in teacher_models]
+        weights = np.array(accuracies) / np.sum(accuracies)  # Normalize weights
+        return weights
+    
     def get_soft_targets(images):
-        """Averages soft targets from multiple teachers."""
-        soft_targets = np.mean([tf.nn.softmax(teacher(images) / temperature) for teacher in teacher_models], axis=0)
+        """Averages soft targets from multiple teachers with adaptive weighting."""
+        weights = get_teacher_weights(images)
+        soft_targets = np.sum([weights[i] * tf.nn.softmax(teacher(images) / temperature) for i, teacher in enumerate(teacher_models)], axis=0)
         return soft_targets
     
     def distillation_loss(y_true, y_pred):
@@ -53,7 +60,7 @@ if __name__ == "__main__":
     teacher2 = ResNet50(weights=None, input_shape=(32, 32, 3), classes=10)
     student = MobileNet(weights=None, input_shape=(32, 32, 3), classes=10)
     
-    # Perform multi-teacher knowledge distillation
+    # Perform multi-teacher knowledge distillation with adaptive weighting
     trained_student = multi_teacher_distillation([teacher1, teacher2], student, (train_images, train_labels), (test_images, test_labels))
     
     # Display student model summary
