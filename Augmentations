@@ -1,0 +1,141 @@
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import numpy as np
+import cv2
+import random
+
+class ImageAugmenter:
+    def __init__(self, augmentations=None, task="classification"):
+        """
+        Initializes the augmentation pipeline.
+
+        Parameters:
+        - augmentations: List of Albumentations transformations to apply.
+        - task: Type of image-processing task: "classification", "detection", "segmentation".
+        """
+        self.task = task
+
+        if augmentations is None:
+            if task == "classification":
+                self.augmentations = A.Compose([
+                    A.HorizontalFlip(p=0.5),
+                    A.RandomBrightnessContrast(p=0.2),
+                    A.Rotate(limit=20, p=0.5),
+                    A.Cutout(num_holes=8, max_h_size=8, max_w_size=8, p=0.5),
+                    A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                    ToTensorV2()
+                ])
+            elif task == "detection":
+                self.augmentations = A.Compose([
+                    A.HorizontalFlip(p=0.5),
+                    A.RandomBrightnessContrast(p=0.2),
+                    A.Rotate(limit=20, p=0.5),
+                    A.Cutout(num_holes=8, max_h_size=8, max_w_size=8, p=0.5),
+                    A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                    ToTensorV2()
+                ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+            elif task == "segmentation":
+                self.augmentations = A.Compose([
+                    A.HorizontalFlip(p=0.5),
+                    A.RandomBrightnessContrast(p=0.2),
+                    A.Rotate(limit=20, p=0.5),
+                    A.Cutout(num_holes=8, max_h_size=8, max_w_size=8, p=0.5),
+                    A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                    ToTensorV2()
+                ])
+        else:
+            self.augmentations = A.Compose(augmentations)
+
+    def apply_augmentation(self, image, label=None, bbox=None, mask=None):
+        """
+        Applies augmentation to an image and ensures labels are transformed correctly.
+
+        Parameters:
+        - image: Input image as a NumPy array.
+        - label: Classification label (if applicable).
+        - bbox: Bounding box (if object detection).
+        - mask: Segmentation mask (if applicable).
+
+        Returns:
+        - Transformed image and corresponding label, bbox, or mask.
+        """
+        if self.task == "classification":
+            augmented = self.augmentations(image=image)
+            return augmented["image"], label  # Labels remain unchanged in classification
+
+        elif self.task == "detection":
+            if bbox is None or label is None:
+                raise ValueError("Bounding boxes and labels must be provided for object detection tasks.")
+            augmented = self.augmentations(image=image, bboxes=bbox, class_labels=label)
+            return augmented["image"], augmented["class_labels"], augmented["bboxes"]
+
+        elif self.task == "segmentation":
+            if mask is None:
+                raise ValueError("Mask must be provided for segmentation tasks.")
+            augmented = self.augmentations(image=image, mask=mask)
+            return augmented["image"], mask
+
+    def augment_dataset(self, images, labels=None, bboxes=None, masks=None):
+        """
+        Applies augmentations to an entire dataset.
+
+        Parameters:
+        - images: List/Array of images.
+        - labels: List of classification labels.
+        - bboxes: List of bounding boxes (if applicable).
+        - masks: List of segmentation masks (if applicable).
+
+        Returns:
+        - Augmented images, labels, bounding boxes, and masks.
+        """
+        augmented_images, augmented_labels, augmented_bboxes, augmented_masks = [], [], [], []
+
+        for i in range(len(images)):
+            if self.task == "classification":
+                transformed_image, transformed_label = self.apply_augmentation(images[i], labels[i])
+                augmented_images.append(transformed_image)
+                augmented_labels.append(transformed_label)
+
+            elif self.task == "detection":
+                transformed_image, transformed_label, transformed_bbox = self.apply_augmentation(images[i], labels[i], bboxes[i])
+                augmented_images.append(transformed_image)
+                augmented_labels.append(transformed_label)
+                augmented_bboxes.append(transformed_bbox)
+
+            elif self.task == "segmentation":
+                transformed_image, transformed_mask = self.apply_augmentation(images[i], mask=masks[i])
+                augmented_images.append(transformed_image)
+                augmented_masks.append(transformed_mask)
+
+        return np.array(augmented_images), np.array(augmented_labels) if augmented_labels else None, augmented_bboxes if augmented_bboxes else None, augmented_masks if augmented_masks else None
+
+# Example Usage
+if __name__ == "__main__":
+    from tensorflow.keras.datasets import cifar10
+    import matplotlib.pyplot as plt
+
+    # Load dataset (CIFAR-10)
+    (train_images, train_labels), (test_images, test_labels) = cifar10.load_data()
+
+    # Convert images to BGR (Albumentations uses OpenCV format)
+    train_images = np.array([cv2.cvtColor(img, cv2.COLOR_RGB2BGR) for img in train_images])
+
+    # Initialize Augmenter for classification
+    augmenter = ImageAugmenter(task="classification")
+
+    # Apply augmentations
+    augmented_images, augmented_labels, _, _ = augmenter.augment_dataset(train_images, train_labels)
+
+    # Show example before and after augmentation
+    idx = random.randint(0, len(train_images) - 1)
+
+    fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+    ax[0].imshow(cv2.cvtColor(train_images[idx], cv2.COLOR_BGR2RGB))
+    ax[0].set_title("Original Image")
+    ax[0].axis("off")
+
+    ax[1].imshow(augmented_images[idx].transpose(1, 2, 0))  # Convert tensor back to image
+    ax[1].set_title("Augmented Image")
+    ax[1].axis("off")
+
+    plt.show()
