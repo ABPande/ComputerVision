@@ -1,0 +1,93 @@
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Conv2D, Conv2DTranspose, UpSampling2D, LeakyReLU
+from tensorflow.keras.models import Model
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.image import resize
+
+class ImageUpscaler:
+    def __init__(self, input_size=(32, 32), output_size=(64, 64)):
+        """
+        Initialize the Image Upscaler model with the specified input and output sizes.
+        """
+        self.input_size = input_size
+        self.output_size = output_size
+        self.model = self.build_model()
+        self.model.compile(optimizer="adam", loss="mse")
+    
+    def build_model(self):
+        """
+        Builds a CNN-based upscaling model that upscales images from input_size to output_size.
+        """
+        inputs = Input(shape=(self.input_size[0], self.input_size[1], 3))
+        
+        # Feature Extraction
+        x = Conv2D(64, (3, 3), padding="same")(inputs)
+        x = LeakyReLU(alpha=0.2)(x)
+        x = Conv2D(128, (3, 3), padding="same")(x)
+        x = LeakyReLU(alpha=0.2)(x)
+
+        # Upsampling
+        x = UpSampling2D(size=(self.output_size[0] // self.input_size[0], 
+                               self.output_size[1] // self.input_size[1]))(x)
+        x = Conv2D(64, (3, 3), padding="same")(x)
+        x = LeakyReLU(alpha=0.2)(x)
+        
+        # Final Layer
+        x = Conv2DTranspose(3, (3, 3), padding="same", activation="sigmoid")(x)
+        
+        return Model(inputs, x)
+    
+    def train(self, images, epochs=10, batch_size=64):
+        """
+        Trains the upscaler model using the given images.
+        """
+        images = images.astype("float32") / 255.0  # Normalize input images
+        resized_targets = np.array([resize(img, self.output_size).numpy() for img in images])
+        self.model.fit(images, resized_targets, epochs=epochs, batch_size=batch_size, validation_split=0.1)
+    
+    def upscale(self, images):
+        """
+        Upscales images using the trained model.
+        """
+        images = images.astype("float32") / 255.0
+        return self.model.predict(images)
+    
+    def visualize(self, original, upscaled):
+        """
+        Plots the original vs. upscaled image.
+        """
+        plt.figure(figsize=(8, 4))
+        
+        # Original Image
+        plt.subplot(1, 2, 1)
+        plt.imshow(original)
+        plt.title("Original")
+        plt.axis("off")
+        
+        # Upscaled Image
+        plt.subplot(1, 2, 2)
+        plt.imshow(upscaled)
+        plt.title("Upscaled")
+        plt.axis("off")
+        
+        plt.show()
+
+# Example usage:
+if __name__ == "__main__":
+    from tensorflow.keras.datasets import cifar100
+    (train_images, _), (_, _) = cifar100.load_data()
+    
+    # Select a subset of images
+    sample_images = train_images[:1000]
+    
+    # Initialize and train the upscaler
+    upscaler = ImageUpscaler(input_size=(32, 32), output_size=(64, 64))
+    upscaler.train(sample_images, epochs=5)
+    
+    # Test upscaling
+    test_image = sample_images[0]
+    upscaled_image = upscaler.upscale(np.expand_dims(test_image, axis=0))[0]
+    
+    # Visualize results
+    upscaler.visualize(test_image, upscaled_image)
