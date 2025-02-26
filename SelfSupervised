@@ -1,0 +1,105 @@
+import tensorflow as tf
+import numpy as np
+import tensorflow_addons as tfa
+import matplotlib.pyplot as plt
+
+class SimCLR:
+    def __init__(self, base_model, projection_dim=128, temperature=0.1):
+        """
+        Initializes the SimCLR model.
+
+        Parameters:
+        - base_model: The backbone CNN model (e.g., ResNet, EfficientNet).
+        - projection_dim: The dimension of the projection head.
+        - temperature: Temperature scaling factor for contrastive loss.
+        """
+        self.base_model = base_model
+        self.projection_dim = projection_dim
+        self.temperature = temperature
+        self.model = self._build_model()
+
+    def _build_model(self):
+        """Constructs the SimCLR architecture with a projection head."""
+        inputs = tf.keras.Input(shape=(32, 32, 3))
+        features = self.base_model(inputs, training=False)
+        features = tf.keras.layers.GlobalAveragePooling2D()(features)
+
+        # Projection Head
+        projection = tf.keras.layers.Dense(512, activation="relu")(features)
+        projection = tf.keras.layers.Dense(self.projection_dim)(projection)
+
+        return tf.keras.Model(inputs, projection)
+
+    def contrastive_loss(self, projections):
+        """
+        Computes the NT-Xent contrastive loss.
+
+        Parameters:
+        - projections: Output projections from the model.
+
+        Returns:
+        - Contrastive loss value.
+        """
+        projections = tf.math.l2_normalize(projections, axis=1)
+        similarity_matrix = tf.matmul(projections, projections, transpose_b=True) / self.temperature
+
+        # Mask for positive pairs (excluding diagonal elements)
+        batch_size = tf.shape(projections)[0]
+        labels = tf.range(batch_size)
+        contrastive_labels = tf.concat([labels, labels], axis=0)
+
+        loss = tf.keras.losses.sparse_categorical_crossentropy(contrastive_labels, similarity_matrix, from_logits=True)
+        return tf.reduce_mean(loss)
+
+    def train_step(self, images):
+        """
+        Custom training step for contrastive learning.
+
+        Parameters:
+        - images: Augmented image pairs.
+
+        Returns:
+        - Contrastive loss.
+        """
+        with tf.GradientTape() as tape:
+            projections = self.model(images, training=True)
+            loss = self.contrastive_loss(projections)
+
+        gradients = tape.gradient(loss, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+        return loss
+
+    def compile(self, optimizer):
+        """Compiles the model with an optimizer."""
+        self.optimizer = optimizer
+
+    def train(self, dataset, epochs=10):
+        """Trains the SimCLR model."""
+        for epoch in range(epochs):
+            for images in dataset:
+                loss = self.train_step(images)
+            print(f"Epoch {epoch+1}, Loss: {loss.numpy():.4f}")
+
+# Example Usage
+if __name__ == "__main__":
+    from tensorflow.keras.applications import ResNet50
+    from tensorflow.keras.datasets import cifar10
+    from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+    # Load CIFAR-10 (only using images)
+    (train_images, _), (_, _) = cifar10.load_data()
+    train_images = train_images.astype("float32") / 255.0
+
+    # Create Data Augmentation Pipeline for Contrastive Learning
+    data_generator = ImageDataGenerator(rotation_range=30, horizontal_flip=True, brightness_range=[0.5, 1.5])
+    dataset = tf.data.Dataset.from_tensor_slices(train_images)
+    dataset = dataset.map(lambda x: (data_generator.random_transform(x), data_generator.random_transform(x)))
+    dataset = dataset.batch(128).prefetch(tf.data.experimental.AUTOTUNE)
+
+    # Initialize SimCLR with ResNet50 Backbone
+    base_model = ResNet50(weights=None, include_top=False, input_shape=(32, 32, 3))
+    simclr = SimCLR(base_model)
+    simclr.compile(optimizer=tf.keras.optimizers.Adam())
+
+    # Train SimCLR
+    simclr.train(dataset, epochs=5)
