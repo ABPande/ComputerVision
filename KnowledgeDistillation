@@ -1,0 +1,52 @@
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, Softmax
+import numpy as np
+
+def knowledge_distillation(teacher_model, student_model, train_data, test_data, temperature=5.0, alpha=0.5, epochs=10, batch_size=32):
+    """
+    Performs knowledge distillation on a given computer vision model.
+    
+    Parameters:
+    - teacher_model: Pre-trained Keras model (larger model)
+    - student_model: Smaller Keras model to be trained
+    - train_data: Training dataset (TensorFlow dataset or NumPy array)
+    - test_data: Testing dataset (TensorFlow dataset or NumPy array)
+    - temperature: Softening factor for distillation (default: 5.0)
+    - alpha: Weight for balancing true label loss vs. distillation loss (default: 0.5)
+    - epochs: Number of training epochs (default: 10)
+    - batch_size: Batch size for training (default: 32)
+    
+    Returns:
+    - Fully trained student model
+    """
+    def distillation_loss(y_true, y_pred):
+        """Custom loss function combining true label loss and soft target loss."""
+        soft_targets = tf.nn.softmax(teacher_model(train_data[0]) / temperature)
+        hard_loss = tf.keras.losses.sparse_categorical_crossentropy(y_true, y_pred)
+        soft_loss = tf.keras.losses.KLDivergence()(soft_targets, tf.nn.softmax(y_pred / temperature))
+        return alpha * hard_loss + (1 - alpha) * soft_loss
+    
+    student_model.compile(optimizer=tf.keras.optimizers.Adam(), loss=distillation_loss, metrics=['accuracy'])
+    student_model.fit(train_data[0], train_data[1], epochs=epochs, batch_size=batch_size, validation_data=test_data)
+    
+    return student_model
+
+# Example usage
+if __name__ == "__main__":
+    from tensorflow.keras.applications import MobileNetV2, MobileNet
+    from tensorflow.keras.datasets import cifar10
+    
+    # Load CIFAR-10 dataset
+    (train_images, train_labels), (test_images, test_labels) = cifar10.load_data()
+    train_images, test_images = train_images / 255.0, test_images / 255.0
+    
+    # Define teacher and student models
+    teacher = MobileNetV2(weights=None, input_shape=(32, 32, 3), classes=10)
+    student = MobileNet(weights=None, input_shape=(32, 32, 3), classes=10)
+    
+    # Perform knowledge distillation
+    trained_student = knowledge_distillation(teacher, student, (train_images, train_labels), (test_images, test_labels))
+    
+    # Display student model summary
+    trained_student.summary()
