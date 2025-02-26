@@ -1,0 +1,72 @@
+import cv2
+import numpy as np
+from skimage import exposure, filters
+from scipy.ndimage import gaussian_filter
+import matplotlib.pyplot as plt
+
+def preprocess_image(image, is_medical=True):
+    """
+    Preprocess an image by performing standardization, cleaning, and contrast adjustment.
+    This function assumes the image may be a medical image and ensures necessary steps are taken.
+    
+    Parameters:
+    - image: Input image (numpy array)
+    - is_medical: Boolean flag to apply medical image-specific processing
+    
+    Returns:
+    - Processed image (numpy array)
+    """
+    # Convert to grayscale if the image has multiple channels
+    if len(image.shape) == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Normalize pixel values to [0, 1]
+    image = image.astype(np.float32) / 255.0
+    
+    # Apply Gaussian smoothing to reduce noise
+    image = gaussian_filter(image, sigma=1)
+    
+    # Apply histogram equalization for contrast enhancement
+    image = exposure.equalize_hist(image)
+    
+    # Apply adaptive contrast stretching (CLAHE) for medical images
+    if is_medical:
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        image = clahe.apply((image * 255).astype(np.uint8)) / 255.0
+    
+    # Apply edge-preserving denoising
+    image = cv2.fastNlMeansDenoising((image * 255).astype(np.uint8), None, h=10, templateWindowSize=7, searchWindowSize=21)
+    
+    # Normalize again to ensure the output is within [0,1]
+    image = image.astype(np.float32) / 255.0
+    
+    return image
+
+def visualize_preprocessing(original, processed):
+    """
+    Display the original and processed images side by side.
+    
+    Parameters:
+    - original: Original image (numpy array)
+    - processed: Processed image (numpy array)
+    """
+    plt.figure(figsize=(10, 5))
+    
+    plt.subplot(1, 2, 1)
+    plt.imshow(original, cmap='gray')
+    plt.title("Original Image")
+    plt.axis("off")
+    
+    plt.subplot(1, 2, 2)
+    plt.imshow(processed, cmap='gray')
+    plt.title("Processed Image")
+    plt.axis("off")
+    
+    plt.show()
+
+# Example usage
+if __name__ == "__main__":
+    image_path = "sample_medical_image.png"  # Replace with an actual image path
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    processed_image = preprocess_image(image, is_medical=True)
+    visualize_preprocessing(image, processed_image)
