@@ -1,0 +1,114 @@
+import tensorflow as tf
+import numpy as np
+import tensorly as tl
+from tensorly.decomposition import tucker
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Conv2D
+
+tl.set_backend('tensorflow')
+
+class LowRankCompression:
+    def __init__(self, model, method="svd"):
+        """
+        Initializes the low-rank compression module.
+
+        Parameters:
+        - model: A trained TensorFlow/Keras model.
+        - method: "svd" for Singular Value Decomposition or "tucker" for Tucker Decomposition.
+        """
+        self.model = model
+        self.method = method
+
+    def svd_decomposition(self, layer):
+        """
+        Applies SVD to compress a convolutional layer.
+
+        Parameters:
+        - layer: A Conv2D layer from the model.
+
+        Returns:
+        - New compressed layers replacing the original Conv2D layer.
+        """
+        weights, biases = layer.get_weights()
+        filters, height, width, channels = weights.shape
+
+        reshaped_weights = weights.reshape((filters, -1))  # Flatten the spatial dimensions
+        U, S, Vt = np.linalg.svd(reshaped_weights, full_matrices=False)
+
+        # Keep only top-k singular values (rank selection)
+        rank = min(filters, channels) // 2  # Adjustable compression factor
+        U_k, S_k, Vt_k = U[:, :rank], np.diag(S[:rank]), Vt[:rank, :]
+
+        new_weights1 = U_k.reshape((filters, 1, 1, rank))
+        new_weights2 = np.dot(S_k, Vt_k).reshape((rank, height, width, channels))
+
+        conv1 = Conv2D(rank, (1, 1), activation='relu', padding='same', use_bias=False)(layer.input)
+        conv2 = Conv2D(filters, (height, width), activation='relu', padding='same', use_bias=True)(conv1)
+
+        conv1.set_weights([new_weights1])
+        conv2.set_weights([new_weights2, biases])
+
+        return conv1, conv2
+
+    def tucker_decomposition(self, layer, rank=0.5):
+        """
+        Applies Tucker Decomposition to compress a convolutional layer.
+
+        Parameters:
+        - layer: A Conv2D layer from the model.
+        - rank: Rank reduction factor (0.5 keeps 50% of components).
+
+        Returns:
+        - New compressed layers replacing the original Conv2D layer.
+        """
+        weights, biases = layer.get_weights()
+        core, factors = tucker(weights, ranks=[int(rank * s) for s in weights.shape])
+
+        conv1 = Conv2D(factors[0].shape[1], (1, 1), activation='relu', padding='same', use_bias=False)(layer.input)
+        conv2 = Conv2D(factors[1].shape[1], (weights.shape[1], weights.shape[2]), activation='relu', padding='same', use_bias=True)(conv1)
+
+        conv1.set_weights([factors[0]])
+        conv2.set_weights([factors[1], biases])
+
+        return conv1, conv2
+
+    def compress_model(self):
+        """
+        Compresses the CNN model by applying low-rank factorization to convolutional layers.
+
+        Returns:
+        - A new compressed Keras model.
+        """
+        new_layers = []
+        for layer in self.model.layers:
+            if isinstance(layer, Conv2D):
+                if self.method == "svd":
+                    compressed_layers = self.svd_decomposition(layer)
+                elif self.method == "tucker":
+                    compressed_layers = self.tucker_decomposition(layer)
+                else:
+                    raise ValueError("Unsupported compression method. Choose 'svd' or 'tucker'.")
+                new_layers.extend(compressed_layers)
+            else:
+                new_layers.append(layer)
+
+        compressed_model = Model(inputs=self.model.input, outputs=new_layers[-1].output)
+        return compressed_model
+
+
+# Example Usage
+if __name__ == "__main__":
+    from tensorflow.keras.applications import MobileNetV2
+
+    # Load Pretrained Model
+    model = MobileNetV2(weights="imagenet", include_top=False)
+
+    # Apply Low-Rank Compression
+    compressor = LowRankCompression(model, method="svd")
+    compressed_model = compressor.compress_model()
+
+    # Print Model Summary Before & After
+    print("\nOriginal Model:")
+    model.summary()
+    print("\nCompressed Model:")
+    compressed_model.summary()
