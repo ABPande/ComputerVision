@@ -1,0 +1,140 @@
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Conv2D, Conv2DTranspose, LeakyReLU, BatchNormalization, Dense, Flatten, Reshape, Dropout
+from tensorflow.keras.models import Model
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.image import resize
+
+class GANUpscaler:
+    def __init__(self, input_size=(32, 32), output_size=(64, 64)):
+        """
+        Initialize a GAN-based upscaler with the specified input and output sizes.
+        """
+        self.input_size = input_size
+        self.output_size = output_size
+        self.generator = self.build_generator()
+        self.discriminator = self.build_discriminator()
+        self.gan = self.build_gan()
+        
+        self.generator.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002), loss="mse")
+        self.discriminator.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002), loss="binary_crossentropy", metrics=['accuracy'])
+        self.gan.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002), loss="binary_crossentropy")
+    
+    def build_generator(self):
+        """
+        Builds the generator model that upsamples an image from input_size to output_size.
+        """
+        inputs = Input(shape=(self.input_size[0], self.input_size[1], 3))
+        x = Conv2D(64, (3, 3), padding="same")(inputs)
+        x = LeakyReLU(alpha=0.2)(x)
+        x = BatchNormalization()(x)
+        x = Conv2D(128, (3, 3), padding="same")(x)
+        x = LeakyReLU(alpha=0.2)(x)
+        x = BatchNormalization()(x)
+        
+        x = Conv2DTranspose(128, (3, 3), strides=2, padding="same")(x)
+        x = LeakyReLU(alpha=0.2)(x)
+        x = BatchNormalization()(x)
+        x = Conv2DTranspose(64, (3, 3), padding="same")(x)
+        x = LeakyReLU(alpha=0.2)(x)
+        
+        outputs = Conv2D(3, (3, 3), activation="sigmoid", padding="same")(x)
+        return Model(inputs, outputs)
+    
+    def build_discriminator(self):
+        """
+        Builds the discriminator model that distinguishes real vs generated upscaled images.
+        """
+        inputs = Input(shape=(self.output_size[0], self.output_size[1], 3))
+        x = Conv2D(64, (3, 3), strides=2, padding="same")(inputs)
+        x = LeakyReLU(alpha=0.2)(x)
+        x = Dropout(0.3)(x)
+        
+        x = Conv2D(128, (3, 3), strides=2, padding="same")(x)
+        x = LeakyReLU(alpha=0.2)(x)
+        x = Dropout(0.3)(x)
+        
+        x = Flatten()(x)
+        outputs = Dense(1, activation="sigmoid")(x)
+        return Model(inputs, outputs)
+    
+    def build_gan(self):
+        """
+        Combines the generator and discriminator to form a GAN model.
+        """
+        self.discriminator.trainable = False
+        inputs = Input(shape=(self.input_size[0], self.input_size[1], 3))
+        generated_image = self.generator(inputs)
+        validity = self.discriminator(generated_image)
+        return Model(inputs, validity)
+    
+    def train(self, images, epochs=10, batch_size=64):
+        """
+        Trains the GAN upscaler model using the given images.
+        """
+        images = images.astype("float32") / 255.0  # Normalize images
+        resized_targets = np.array([resize(img, self.output_size).numpy() for img in images])
+        
+        for epoch in range(epochs):
+            idx = np.random.randint(0, images.shape[0], batch_size)
+            real_images = resized_targets[idx]
+            low_res_images = images[idx]
+            
+            fake_images = self.generator.predict(low_res_images)
+            
+            real_labels = np.ones((batch_size, 1))
+            fake_labels = np.zeros((batch_size, 1))
+            
+            d_loss_real = self.discriminator.train_on_batch(real_images, real_labels)
+            d_loss_fake = self.discriminator.train_on_batch(fake_images, fake_labels)
+            d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+            
+            g_loss = self.gan.train_on_batch(low_res_images, real_labels)
+            
+            print(f"Epoch {epoch+1}/{epochs}, D Loss: {d_loss[0]:.4f}, G Loss: {g_loss:.4f}")
+    
+    def upscale(self, images):
+        """
+        Uses the trained generator to upscale images.
+        """
+        images = images.astype("float32") / 255.0
+        return self.generator.predict(images)
+    
+    def visualize(self, original, upscaled):
+        """
+        Displays the original vs. GAN-upscaled image.
+        """
+        plt.figure(figsize=(8, 4))
+        
+        # Original Image
+        plt.subplot(1, 2, 1)
+        plt.imshow(original)
+        plt.title("Original")
+        plt.axis("off")
+        
+        # Upscaled Image
+        plt.subplot(1, 2, 2)
+        plt.imshow(upscaled)
+        plt.title("GAN Upscaled")
+        plt.axis("off")
+        
+        plt.show()
+
+# Example usage:
+if __name__ == "__main__":
+    from tensorflow.keras.datasets import cifar100
+    (train_images, _), (_, _) = cifar100.load_data()
+    
+    # Select a subset of images
+    sample_images = train_images[:1000]
+    
+    # Initialize and train the GAN upscaler
+    gan_upscaler = GANUpscaler(input_size=(32, 32), output_size=(64, 64))
+    gan_upscaler.train(sample_images, epochs=5)
+    
+    # Test upscaling
+    test_image = sample_images[0]
+    upscaled_image = gan_upscaler.upscale(np.expand_dims(test_image, axis=0))[0]
+    
+    # Visualize results
+    gan_upscaler.visualize(test_image, upscaled_image)
