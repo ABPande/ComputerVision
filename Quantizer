@@ -1,0 +1,44 @@
+import tensorflow as tf
+import tensorflow_model_optimization as tfmot
+
+def quantize_model(model, bit_width=8):
+    """
+    Quantizes a given Keras model to the specified bit width.
+    
+    Parameters:
+    - model: The Keras model to be quantized
+    - bit_width: The bit precision for quantization (default: 8, options: 8 or 4)
+    
+    Returns:
+    - Quantized model
+    """
+    if bit_width not in [8, 4]:
+        raise ValueError("Only 8-bit and 4-bit quantization are supported.")
+    
+    if bit_width == 8:
+        quantize_scope = tfmot.quantization.keras.quantize_model
+    elif bit_width == 4:
+        quantize_scope = tfmot.quantization.keras.experimental.default_4bit_quantize_scheme
+    
+    quantized_model = quantize_scope(model)
+    
+    quantized_model.compile(
+        optimizer=model.optimizer,
+        loss=model.loss,
+        metrics=model.metrics,
+    )
+    
+    return quantized_model
+
+# Example usage
+if __name__ == "__main__":
+    from tensorflow.keras.applications import MobileNetV2
+    
+    # Load a sample model
+    model = MobileNetV2(weights=None, input_shape=(224, 224, 3), classes=10)
+    
+    # Quantize the model to 8-bit
+    quantized_model = quantize_model(model, bit_width=8)
+    
+    # Display model summary
+    quantized_model.summary()
