@@ -1,0 +1,46 @@
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Dense, Flatten, Conv2D, MaxPooling2D, Dropout
+from tensorflow.keras.models import Model, Sequential
+
+def build_cv_model(input_shape, output_classes, hidden_layers=2, hidden_neurons=128, dropout_rate=0.3):
+    """
+    Builds a customizable CNN model for computer vision tasks.
+    
+    Parameters:
+    - input_shape: Tuple representing the shape of input images (height, width, channels)
+    - output_classes: Number of output classes
+    - hidden_layers: Number of hidden convolutional layers
+    - hidden_neurons: Number of neurons in each fully connected layer
+    - dropout_rate: Dropout rate to prevent overfitting
+    
+    Returns:
+    - Compiled Keras model
+    """
+    model = Sequential()
+    model.add(Input(shape=input_shape))
+    
+    # Convolutional layers
+    for _ in range(hidden_layers):
+        model.add(Conv2D(filters=hidden_neurons // 2, kernel_size=(3, 3), activation='relu', padding='same'))
+        model.add(MaxPooling2D(pool_size=(2, 2)))
+    
+    model.add(Flatten())
+    
+    # Fully connected layers
+    for _ in range(hidden_layers):
+        model.add(Dense(hidden_neurons, activation='relu'))
+        model.add(Dropout(dropout_rate))
+    
+    model.add(Dense(output_classes, activation='softmax'))
+    
+    # Compile model
+    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    
+    return model
+
+# Example usage
+if __name__ == "__main__":
+    input_shape = (64, 64, 3)  # Example input size
+    output_classes = 10  # Example number of classes
+    model = build_cv_model(input_shape, output_classes, hidden_layers=3, hidden_neurons=256)
+    model.summary()
