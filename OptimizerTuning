@@ -1,0 +1,70 @@
+import tensorflow as tf
+from tensorflow.keras.optimizers.schedules import ExponentialDecay, CosineDecay, PolynomialDecay
+from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
+from sklearn.model_selection import RandomizedSearchCV
+
+def compile_model(model, optimizer='adam', learning_rate=0.001):
+    """
+    Compiles a given model with a customizable optimizer and learning rate.
+    """
+    if optimizer == 'adam':
+        opt = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+    elif optimizer == 'sgd':
+        opt = tf.keras.optimizers.SGD(learning_rate=learning_rate)
+    elif optimizer == 'rmsprop':
+        opt = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
+    else:
+        raise ValueError("Unsupported optimizer. Choose from: 'adam', 'sgd', 'rmsprop'")
+    
+    model.compile(optimizer=opt, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+def optimizer_scheduler_tuning(model_fn, train_images, train_labels, param_grid=None, n_iter=10):
+    """
+    Tunes optimizers and learning rate schedules for a given model.
+    
+    Parameters:
+    - model_fn: Function returning a compiled Keras model.
+    - train_images: NumPy array of training images.
+    - train_labels: NumPy array of training labels.
+    - param_grid: Dictionary of hyperparameters to tune.
+    - n_iter: Number of iterations for RandomizedSearchCV.
+    
+    Returns:
+    - Best model found.
+    - Best hyperparameters.
+    """
+    if param_grid is None:
+        param_grid = {
+            'optimizer': ['adam', 'sgd', 'rmsprop'],
+            'learning_rate': [0.001, 0.0001, 0.01]
+        }
+    
+    model = KerasClassifier(build_fn=model_fn, verbose=0)
+    random_search = RandomizedSearchCV(estimator=model, param_distributions=param_grid, n_iter=n_iter, cv=3, verbose=1, n_jobs=-1)
+    random_search.fit(train_images, train_labels)
+    
+    return random_search.best_estimator_, random_search.best_params_
+
+# Example usage
+if __name__ == "__main__":
+    from tensorflow.keras.datasets import cifar10
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+
+    def build_model():
+        model = Sequential([
+            Conv2D(32, (3, 3), activation='relu', input_shape=(32, 32, 3)),
+            MaxPooling2D(pool_size=(2, 2)),
+            Flatten(),
+            Dense(128, activation='relu'),
+            Dense(10, activation='softmax')
+        ])
+        return model
+    
+    (train_images, train_labels), (_, _) = cifar10.load_data()
+    train_images = train_images / 255.0  # Normalize images
+    
+    best_model, best_params = optimizer_scheduler_tuning(lambda: compile_model(build_model()), train_images, train_labels)
+    print("Best Hyperparameters:", best_params)
+    best_model.model.summary()
