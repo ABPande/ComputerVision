@@ -1,0 +1,161 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import cv2
+import shap
+import lime
+from lime import lime_image
+from skimage.segmentation import mark_boundaries
+from tensorflow.keras.models import Model
+import tensorflow.keras.backend as K
+
+
+class CVExplainability:
+    def __init__(self, model):
+        """
+        Initializes the explainability library for a given computer vision model.
+        
+        Parameters:
+        - model: A trained TensorFlow/Keras model.
+        """
+        self.model = model
+
+    def grad_cam(self, image, class_index=None, layer_name=None):
+        """
+        Generates Grad-CAM visualization for an image.
+
+        Parameters:
+        - image: Input image as a NumPy array.
+        - class_index: Target class for which Grad-CAM is computed. If None, predicted class is used.
+        - layer_name: The convolutional layer to use for Grad-CAM. Defaults to the last conv layer.
+
+        Returns:
+        - Heatmap image overlayed on original image.
+        """
+        if layer_name is None:
+            layer_name = [layer.name for layer in self.model.layers if 'conv' in layer.name][-1]  # Last conv layer
+
+        grad_model = Model(inputs=self.model.input, outputs=[self.model.get_layer(layer_name).output, self.model.output])
+
+        with tf.GradientTape() as tape:
+            conv_output, predictions = grad_model(np.expand_dims(image, axis=0))
+            if class_index is None:
+                class_index = np.argmax(predictions[0])
+            loss = predictions[:, class_index]
+
+        grads = tape.gradient(loss, conv_output)
+        pooled_grads = K.mean(grads, axis=(0, 1, 2))
+
+        heatmap = tf.reduce_mean(tf.multiply(pooled_grads, conv_output), axis=-1)[0]
+        heatmap = np.maximum(heatmap, 0)
+        heatmap /= np.max(heatmap)
+
+        heatmap = cv2.resize(heatmap.numpy(), (image.shape[1], image.shape[0]))
+        heatmap = cv2.applyColorMap(np.uint8(255 * heatmap), cv2.COLORMAP_JET)
+
+        superimposed_img = cv2.addWeighted(cv2.cvtColor(image, cv2.COLOR_RGB2BGR), 0.6, heatmap, 0.4, 0)
+        return cv2.cvtColor(superimposed_img, cv2.COLOR_BGR2RGB)
+
+    def lime_explain(self, image):
+        """
+        Generates LIME explanation for an image.
+
+        Parameters:
+        - image: Input image as a NumPy array.
+
+        Returns:
+        - Image with highlighted regions that contribute most to the prediction.
+        """
+        explainer = lime_image.LimeImageExplainer()
+
+        def predict_fn(images):
+            return self.model.predict(np.array(images))
+
+        explanation = explainer.explain_instance(image.astype('double'), predict_fn, top_labels=5, hide_color=0, num_samples=1000)
+        temp, mask = explanation.get_image_and_mask(explanation.top_labels[0], positive_only=True, num_features=10, hide_rest=False)
+        return mark_boundaries(temp, mask)
+
+    def shap_explain(self, image, background=None):
+        """
+        Generates SHAP explanations for a given image.
+
+        Parameters:
+        - image: Input image as a NumPy array.
+        - background: Optional background dataset for SHAP KernelExplainer.
+
+        Returns:
+        - SHAP summary plot.
+        """
+        if background is None:
+            background = np.random.rand(10, *image.shape)  # Use random background samples if none provided
+
+        explainer = shap.Explainer(self.model, background)
+        shap_values = explainer(np.expand_dims(image, axis=0))
+
+        shap.image_plot(shap_values, np.expand_dims(image, axis=0))
+
+    def saliency_map(self, image, class_index=None):
+        """
+        Generates a Saliency Map for the given image.
+
+        Parameters:
+        - image: Input image as a NumPy array.
+        - class_index: Class index for which saliency is computed. If None, uses predicted class.
+
+        Returns:
+        - Saliency map overlayed on the image.
+        """
+        image = tf.convert_to_tensor(image[np.newaxis, ...], dtype=tf.float32)
+        with tf.GradientTape() as tape:
+            tape.watch(image)
+            predictions = self.model(image)
+            if class_index is None:
+                class_index = tf.argmax(predictions[0])
+            loss = predictions[:, class_index]
+
+        gradients = tape.gradient(loss, image)[0]
+        saliency = tf.reduce_max(tf.abs(gradients), axis=-1)
+
+        # Normalize and apply color map
+        saliency = saliency.numpy()
+        saliency = (saliency - np.min(saliency)) / (np.max(saliency) - np.min(saliency))
+        saliency = cv2.applyColorMap(np.uint8(255 * saliency), cv2.COLORMAP_JET)
+
+        superimposed_img = cv2.addWeighted(cv2.cvtColor(image.numpy()[0], cv2.COLOR_RGB2BGR), 0.6, saliency, 0.4, 0)
+        return cv2.cvtColor(superimposed_img, cv2.COLOR_BGR2RGB)
+
+# Example Usage
+if __name__ == "__main__":
+    from tensorflow.keras.applications import VGG16
+    from tensorflow.keras.datasets import cifar10
+
+    # Load pre-trained model
+    model = VGG16(weights="imagenet", include_top=True)
+
+    # Load sample image from CIFAR-10
+    (train_images, train_labels), (test_images, test_labels) = cifar10.load_data()
+    test_images = test_images / 255.0  # Normalize images
+
+    # Initialize Explainability Library
+    explainability = CVExplainability(model)
+
+    # Select a test image
+    sample_image = test_images[0]
+
+    # Generate explanations
+    grad_cam_img = explainability.grad_cam(sample_image)
+    lime_img = explainability.lime_explain(sample_image)
+    
+    # Display Grad-CAM
+    plt.figure(figsize=(6, 3))
+    plt.imshow(grad_cam_img)
+    plt.title("Grad-CAM Explanation")
+    plt.axis("off")
+    plt.show()
+
+    # Display LIME
+    plt.figure(figsize=(6, 3))
+    plt.imshow(lime_img)
+    plt.title("LIME Explanation")
+    plt.axis("off")
+    plt.show()
